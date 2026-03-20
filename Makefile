@@ -35,9 +35,7 @@ LIBS = -L$(CROSSDIR)/m68k-elf/lib -lm -L$(CROSSDIR)/lib/gcc/m68k-elf/$(GCC_VERSI
 	   -LD:/dev/ddraig/os-programs/DOSLib -ldos \
 	   -T $(CROSSDIR)/m68k-elf/lib/ddraig.ld
 
-OBJECTS = zsmplay.o ym2151.o \
-		  src/zsmplayer68k_gcc.o src/zsmplayer68k_c_wrappers.o src/ym2151_ding68k.o \
-		  src/zfxfm68k_gcc.o src/zfxfm68k_c_wrappers.o
+OBJECTS = zsmplay.o ym2151.o zsmplayer68k.o zfxfm68k.o ym2151_ding68k.o
 
 %.o : %.c
 	$(CC) -c $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $<
