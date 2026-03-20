@@ -17,3 +17,6 @@ tmp4
 !lib/README.txt
 lib/*
 now
+*.elf
+*.exe
+

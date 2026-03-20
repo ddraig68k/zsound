@@ -1,65 +1,80 @@
-# Makefile adapted from general-purpose Makefile by Job Vranish
-# "Even simpler Makefile"
-# https://spin.atomicobject.com/2016/08/26/makefile-c-projects/
+CPU = 68000
+TARGET = zsm
 
-LIBDIR	?= lib
-LIBRARY ?= $(LIBDIR)/zsound.lib
+ARCH?=$(CPU)
+TUNE?=$(CPU)
+EXTRA_CFLAGS?=
+DEFINES:=$(DEFINES)
 
-EXEC ?= TEST.PRG
-SRC_DIRS ?= ./src
+ifeq ($(OS),Windows_NT)
+	CROSSDIR = C:/dev/lang/m68k-elf-os
+else
+	CROSSDIR = /opt/m68k-elf-os
+endif
+BIN = $(CROSSDIR)/bin
 
-CC		= cl65
-AS		= cl65
-LD		= cl65
-AR		= ar65
+BINARY=$(TARGET).exe
+BINARY_ELF=$(TARGET).elf
+MAP=$(TARGET).map
 
-FLAGS		= -t cx16 -g
-CFLAGS		= $(FLAGS) -O $(INC_FLAGS)
-ASFLAGS		= $(FLAGS) -c
-LDFLAGS		= $(FLAGS) -C zsound.cfg -u __EXEHDR__ -o
+CC = $(BIN)/m68k-elf-gcc
+AS = $(BIN)/vasmm68k_mot
+LD = $(BIN)/m68k-elf-ld
+OBJCOPY = $(BIN)/m68k-elf-objcopy
+GCC_VERSION = $(shell $(CC) -dumpversion)
 
-SRCS := $(shell find $(SRC_DIRS) -name \*.asm)
-#SRCS := $(shell find $(SRC_DIRS) -name \*.c)
-OBJLIST := $(addsuffix .o,$(basename $(SRCS)))
-#OBJ38	:= $(addsuffix 38,$(OBJLIST))
-#OBJ39	:= $(addsuffix 39,$(OBJLIST))
-#OBJS	:= $(OBJ38) $(OBJ39)
-OBJS	:= $(OBJLIST)
-DEPS := $(OBJLIST:.o=.d)
+CFLAGS=-std=c11 -Wall -Wpedantic -s     \
+       -I. -Iinclude -ID:/dev/ddraig/os-programs/DOSLib -mcpu=$(CPU) -march=$(ARCH) -mtune=$(TUNE) -O2   \
+       -ffunction-sections -fdata-sections -mstrict-align -fomit-frame-pointer \
+	   -fno-unwind-tables -fno-asynchronous-unwind-tables -ffast-math \
+	   -Wa,--register-prefix-optional  $(DEFINES)
 
-INC_DIRS := $(shell find $(SRC_DIRS) -type d)
-INC_FLAGS := $(addprefix -I,$(INC_DIRS))
+LDFLAGS= -Map=$(MAP) -print-memory-usage
+ASFLAGS=-Felf -m$(CPU) -quiet $(DEFINES)
+LIBS = -L$(CROSSDIR)/m68k-elf/lib -lm -L$(CROSSDIR)/lib/gcc/m68k-elf/$(GCC_VERSION) -lgcc \
+	   -LD:/dev/ddraig/os-programs/DOSLib -ldos \
+	   -T $(CROSSDIR)/m68k-elf/lib/ddraig.ld
 
-$(LIBRARY): $(OBJS)
-	@[ -d $(LIBDIR) ] || mkdir -p $(LIBDIR)
-	$(AR) a $@ $(OBJS)
+OBJECTS = zsmplay.o ym2151.o \
+		  src/zsmplayer68k_gcc.o src/zsmplayer68k_c_wrappers.o src/ym2151_ding68k.o \
+		  src/zfxfm68k_gcc.o src/zfxfm68k_c_wrappers.o
 
-.PHONY: lib
-lib: $(LIBRARY)
+%.o : %.c
+	$(CC) -c $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $<
 
+%.o : %.S
+	$(CC) -x assembler-with-cpp -c $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $<
 
-#src/%.o38: src/%.asm
-#	$(AS) $(ASFLAGS) $(REV38) -o $@ $<
-#
-#src/%.o39: src/%.asm
-#	$(AS) $(ASFLAGS) $(REV39) -o $@ $<
-#
-src/%.o: src/%.asm
+%.o : %.asm
 	$(AS) $(ASFLAGS) -o $@ $<
 
-.PHONY: clean
+$(BINARY) : $(BINARY_ELF)
+	$(OBJCOPY) --strip-debug $< $@
+
+$(BINARY_ELF) : $(OBJECTS)
+	$(LD) $(LDFLAGS) $^ -o $@ $(LIBS)
+
+
+.PHONY: all clean dump tools
+
+all: $(BINARY)
+
 clean:
-	$(RM) $(EXEC) $(LIBRARY) $(OBJS) $(DEPS) $(SYM) $(SYMS)
-
-.PHONY: objclean
-objclean:
-	$(RM) $(OBJS)
-
-.PHONY: test
-test: $(EXEC)
-
-.PHONY: %.h
-
-.PHONY: %.inc
-
--include $(DEPS)
+ifeq ($(OS),Windows_NT)
+	cmd /c del /q /f *.lst
+	cmd /c del /q /f *.o
+	cmd /c del /q /f src\*.o
+	cmd /c del /q /f *.map
+	cmd /c del /q /f *.hex
+	cmd /c del /q /f *.bin
+	cmd /c del /q /f *.elf
+	cmd /c del /q /f *.exe
+else
+	rm -f *.lst *.LST
+	rm -f *.o src/*.o
+	rm -f *.a
+	rm -f *.map
+	rm -f *.hex
+	rm -f *.bin *.BIN
+	rm -f *.elf
+endif
