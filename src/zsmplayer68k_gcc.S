@@ -22,7 +22,7 @@
         .globl  zsm_pcm_stop
         .globl  zsm_pcm_is_active
         .globl  zsm_pcm_service
-        .globl  g_ym2151_base_addr
+        .globl  ym2151_writereg
 
         .text
 
@@ -449,23 +449,15 @@ zsm_read_le24:
         rts
 
 zsm_ym_wait:
-.wait:
-        movea.l g_ym2151_base_addr,a1
-        moveq   #0,d0
-        move.b  2(a1),d0
-        btst    #7,d0
-        bne.s   .wait
         rts
 
 zsm_ym_write:
-        movem.l d0-d1/a1,-(sp)
-        bsr     zsm_ym_wait
-        movea.l g_ym2151_base_addr,a1
-        move.b  d0,(a1)
-        bsr     zsm_ym_wait
-        movea.l g_ym2151_base_addr,a1
-        move.b  d1,2(a1)
-        movem.l (sp)+,d0-d1/a1
+        movem.l d0-d1,-(sp)
+        move.l  d1,-(sp)
+        move.l  d0,-(sp)
+        jsr     ym2151_writereg
+        addq.l  #8,sp
+        movem.l (sp)+,d0-d1
         rts
 
         .bss

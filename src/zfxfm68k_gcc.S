@@ -14,7 +14,7 @@
         .globl  zfx_fm_update
         .globl  zfx_fm_stop
         .globl  zfx_fm_is_active
-        .globl  g_ym2151_base_addr
+        .globl  ym2151_writereg
 
         .text
 
@@ -163,21 +163,15 @@ zfx_fm_process_voice_finish:
         rts
 
 zfx_fm_ym_wait:
-zfx_fm_ym_wait_loop:
-        movea.l g_ym2151_base_addr,a1
-        moveq   #0,d2
-        move.b  2(a1),d2
-        btst    #7,d2
-        bne     zfx_fm_ym_wait_loop
         rts
 
 zfx_fm_ym_write:
-        bsr     zfx_fm_ym_wait
-        movea.l g_ym2151_base_addr,a1
-        move.b  d0,(a1)
-        bsr     zfx_fm_ym_wait
-        movea.l g_ym2151_base_addr,a1
-        move.b  d1,2(a1)
+        movem.l d0-d1,-(sp)
+        move.l  d1,-(sp)
+        move.l  d0,-(sp)
+        jsr     ym2151_writereg
+        addq.l  #8,sp
+        movem.l (sp)+,d0-d1
         rts
 
         .bss
