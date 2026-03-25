@@ -22,6 +22,7 @@ typedef struct {
     uint16_t frame_int;
     uint16_t frame_frac;
     uint16_t frame_accum;
+    uint8_t allowed_fm_mask;
     uint8_t rlfbcon_shadow[8];
 } zsm_state_t;
 
@@ -36,8 +37,23 @@ typedef struct {
     uint16_t pending;
 } zsm_pcm_state_t;
 
-static zsm_state_t g_zsm;
+static zsm_state_t g_zsm = {
+    .allowed_fm_mask = 0xffu
+};
 static zsm_pcm_state_t g_zsm_pcm;
+
+static uint8_t zsm_ym_voice_mask(uint8_t reg, uint8_t value)
+{
+    if (reg == 0x08u) {
+        return (uint8_t)(1u << (value & 0x07u));
+    }
+
+    if (reg >= 0x20u) {
+        return (uint8_t)(1u << (reg & 0x07u));
+    }
+
+    return 0u;
+}
 
 static uint16_t read_le16(const uint8_t *p)
 {
@@ -99,8 +115,22 @@ void zsm_c_pcm_service(void)
 
 void zsm_c_init_player(void)
 {
+    uint8_t allowed_fm_mask = g_zsm.allowed_fm_mask;
+
     memset(&g_zsm, 0, sizeof(g_zsm));
+    g_zsm.allowed_fm_mask = allowed_fm_mask;
     zsm_c_pcm_init();
+}
+
+void zsm_c_set_fm_channel_mask(uint8_t mask)
+{
+    g_zsm.allowed_fm_mask = mask;
+    g_zsm.fm_mask &= mask;
+}
+
+uint8_t zsm_c_get_fm_channel_mask(void)
+{
+    return g_zsm.allowed_fm_mask;
 }
 
 void zsm_c_patch_ym_voice(uint8_t voice, const uint8_t *patch)
@@ -136,7 +166,7 @@ int zsm_c_start_music(const void *zsm)
     }
 
     g_zsm.song_base = base;
-    g_zsm.fm_mask = base[9];
+    g_zsm.fm_mask = (uint16_t)(base[9] & g_zsm.allowed_fm_mask);
 
     loop_offset = read_le24(base + 3);
     if (loop_offset != 0u) {
@@ -291,10 +321,13 @@ int zsm_c_step_music(void)
         for (uint8_t count = (uint8_t)(cmd & 0x3fu); count != 0u; --count) {
             uint8_t reg = *g_zsm.data_ptr++;
             uint8_t value = *g_zsm.data_ptr++;
-            ym2151_writereg(reg, value);
+            uint8_t voice_mask = zsm_ym_voice_mask(reg, value);
+            if (voice_mask == 0u || (voice_mask & g_zsm.allowed_fm_mask) != 0u) {
+                ym2151_writereg(reg, value);
 
-            if (reg >= 0x20u && reg <= 0x27u) {
-                g_zsm.rlfbcon_shadow[reg & 7u] = value;
+                if (reg >= 0x20u && reg <= 0x27u) {
+                    g_zsm.rlfbcon_shadow[reg & 7u] = value;
+                }
             }
         }
     }
@@ -312,4 +345,3 @@ void zsm_c_play_frame_60hz(void)
         zsm_c_step_music();
     }
 }
-

@@ -9,7 +9,7 @@ DEFINES:=$(DEFINES)
 ifeq ($(OS),Windows_NT)
 	CROSSDIR = C:/dev/lang/m68k-elf-os
 else
-	CROSSDIR = /opt/m68k-elf-os
+	CROSSDIR = /opt/m68k-elf-9
 endif
 BIN = $(CROSSDIR)/bin
 
@@ -24,7 +24,7 @@ OBJCOPY = $(BIN)/m68k-elf-objcopy
 GCC_VERSION = $(shell $(CC) -dumpversion)
 
 CFLAGS=-std=c11 -Wall -Wpedantic -s     \
-       -I. -Iinclude -ID:/dev/ddraig/os-programs/DOSLib -mcpu=$(CPU) -march=$(ARCH) -mtune=$(TUNE) -O2   \
+       -I. -Iinclude -I..//os-programs/DOSLib -mcpu=$(CPU) -march=$(ARCH) -mtune=$(TUNE) -O2   \
        -ffunction-sections -fdata-sections -mstrict-align -fomit-frame-pointer \
 	   -fno-unwind-tables -fno-asynchronous-unwind-tables -ffast-math \
 	   -Wa,--register-prefix-optional  $(DEFINES)
@@ -32,10 +32,10 @@ CFLAGS=-std=c11 -Wall -Wpedantic -s     \
 LDFLAGS= -Map=$(MAP) -print-memory-usage
 ASFLAGS=-Felf -m$(CPU) -quiet $(DEFINES)
 LIBS = -L$(CROSSDIR)/m68k-elf/lib -lm -L$(CROSSDIR)/lib/gcc/m68k-elf/$(GCC_VERSION) -lgcc \
-	   -LD:/dev/ddraig/os-programs/DOSLib -ldos \
+	   -L../os-programs/DOSLib -ldos \
 	   -T $(CROSSDIR)/m68k-elf/lib/ddraig.ld
 
-OBJECTS = zsmplay.o ym2151.o zsmplayer68k.o zfxfm68k.o ym2151_ding68k.o
+OBJECTS = zsmplay.o ym2151.o zsmplayer68k.o zfxfm68k.o ym2151_ding68k.o vgacard.o
 
 %.o : %.c
 	$(CC) -c $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $<

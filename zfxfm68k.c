@@ -8,6 +8,7 @@ typedef struct {
     const uint8_t *ptr[8];
     uint16_t delay[8];
     uint8_t active_mask;
+    uint8_t allowed_mask;
 } zfx_fm_state_t;
 
 static zfx_fm_state_t g_zfx_fm;
@@ -15,6 +16,17 @@ static zfx_fm_state_t g_zfx_fm;
 void zfx_fm_c_init(void)
 {
     memset(&g_zfx_fm, 0, sizeof(g_zfx_fm));
+    g_zfx_fm.allowed_mask = 0xffu;
+}
+
+void zfx_fm_c_set_allowed_mask(uint8_t mask)
+{
+    g_zfx_fm.allowed_mask = mask;
+}
+
+uint8_t zfx_fm_c_get_allowed_mask(void)
+{
+    return g_zfx_fm.allowed_mask;
 }
 
 int zfx_fm_c_play(uint8_t voice, const uint8_t *sequence)
@@ -23,10 +35,34 @@ int zfx_fm_c_play(uint8_t voice, const uint8_t *sequence)
         return -1;
     }
 
+    if ((g_zfx_fm.allowed_mask & (1u << voice)) == 0u) {
+        return -1;
+    }
+
     g_zfx_fm.ptr[voice] = sequence;
     g_zfx_fm.delay[voice] = 1u;
     g_zfx_fm.active_mask |= (uint8_t)(1u << voice);
     return 0;
+}
+
+int zfx_fm_c_play_any(const uint8_t *sequence)
+{
+    uint8_t available_mask = (uint8_t)(g_zfx_fm.allowed_mask & (uint8_t)~g_zfx_fm.active_mask);
+
+    if (sequence == NULL || available_mask == 0u) {
+        return -1;
+    }
+
+    for (uint8_t voice = 0; voice < 8u; ++voice) {
+        if ((available_mask & (1u << voice)) != 0u) {
+            if (zfx_fm_c_play(voice, sequence) == 0) {
+                return voice;
+            }
+            break;
+        }
+    }
+
+    return -1;
 }
 
 void zfx_fm_c_stop(uint8_t voice)
@@ -94,4 +130,3 @@ void zfx_fm_c_update(void)
         zfx_fm_process_voice(voice);
     }
 }
-

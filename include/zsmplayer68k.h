@@ -14,6 +14,8 @@ void zsm_c_force_loop(uint8_t repeats);
 void zsm_c_set_loop(uint8_t repeats);
 void zsm_c_disable_loop(void);
 uint16_t zsm_c_get_tick_rate(void);
+void zsm_c_set_fm_channel_mask(uint8_t mask);
+uint8_t zsm_c_get_fm_channel_mask(void);
 void zsm_c_patch_ym_voice(uint8_t voice, const uint8_t *patch);
 void zsm_c_pcm_init(void);
 int zsm_c_pcm_play(const void *data, uint32_t length, uint16_t sample_rate, uint16_t format);
