@@ -80,12 +80,12 @@ static void zsm_pcm_on_extcmd0(const uint8_t *ptr, uint16_t len)
     g_zsm_pcm.pending = 1u;
 }
 
-void zsm_c_pcm_init(void)
+void zsm_pcm_init(void)
 {
     memset(&g_zsm_pcm, 0, sizeof(g_zsm_pcm));
 }
 
-int zsm_c_pcm_play(const void *data, uint32_t length, uint16_t sample_rate, uint16_t format)
+int zsm_pcm_play(const void *data, uint32_t length, uint16_t sample_rate, uint16_t format)
 {
     g_zsm_pcm.data = data;
     g_zsm_pcm.length = length;
@@ -95,7 +95,7 @@ int zsm_c_pcm_play(const void *data, uint32_t length, uint16_t sample_rate, uint
     return 0;
 }
 
-void zsm_c_pcm_stop(void)
+void zsm_pcm_stop(void)
 {
     g_zsm_pcm.data = NULL;
     g_zsm_pcm.length = 0u;
@@ -104,36 +104,36 @@ void zsm_c_pcm_stop(void)
     g_zsm_pcm.active = 0u;
 }
 
-int zsm_c_pcm_is_active(void)
+int zsm_pcm_is_active(void)
 {
     return g_zsm_pcm.active != 0u;
 }
 
-void zsm_c_pcm_service(void)
+void zsm_pcm_service(void)
 {
 }
 
-void zsm_c_init_player(void)
+void zsm_init_player(void)
 {
     uint8_t allowed_fm_mask = g_zsm.allowed_fm_mask;
 
     memset(&g_zsm, 0, sizeof(g_zsm));
     g_zsm.allowed_fm_mask = allowed_fm_mask;
-    zsm_c_pcm_init();
+    zsm_pcm_init();
 }
 
-void zsm_c_set_fm_channel_mask(uint8_t mask)
+void zsm_set_fm_channel_mask(uint8_t mask)
 {
     g_zsm.allowed_fm_mask = mask;
     g_zsm.fm_mask &= mask;
 }
 
-uint8_t zsm_c_get_fm_channel_mask(void)
+uint8_t zsm_get_fm_channel_mask(void)
 {
     return g_zsm.allowed_fm_mask;
 }
 
-void zsm_c_patch_ym_voice(uint8_t voice, const uint8_t *patch)
+void zsm_patch_ym_voice(uint8_t voice, const uint8_t *patch)
 {
     uint8_t reg = (uint8_t)(0x20u + voice);
     ym2151_writereg(reg, *patch++);
@@ -148,20 +148,20 @@ void zsm_c_patch_ym_voice(uint8_t voice, const uint8_t *patch)
     }
 }
 
-int zsm_c_start_music(const void *zsm)
+int zsm_start_music(const void *zsm)
 {
     const uint8_t *base = (const uint8_t *)zsm;
     uint32_t loop_offset;
 
-    zsm_c_stop_music();
+    zsm_stop_music();
 
     if (base == NULL || base[0] != 'z' || base[1] != 'm') {
-        zsm_c_init_player();
+        zsm_init_player();
         return -1;
     }
 
     if (base[2] < 1u || base[2] > 1u) {
-        zsm_c_init_player();
+        zsm_init_player();
         return -1;
     }
 
@@ -192,9 +192,9 @@ int zsm_c_start_music(const void *zsm)
     return 0;
 }
 
-void zsm_c_stop_music(void)
+void zsm_stop_music(void)
 {
-    zsm_c_pause_music();
+    zsm_pause_music();
     g_zsm.song_base = NULL;
     g_zsm.data_ptr = NULL;
     g_zsm.loop_ptr = NULL;
@@ -208,10 +208,10 @@ void zsm_c_stop_music(void)
     g_zsm.frame_int = 0u;
     g_zsm.frame_frac = 0u;
     g_zsm.frame_accum = 0u;
-    zsm_c_pcm_stop();
+    zsm_pcm_stop();
 }
 
-void zsm_c_pause_music(void)
+void zsm_pause_music(void)
 {
     g_zsm.saved_delay = g_zsm.delay;
     g_zsm.delay = 0u;
@@ -225,7 +225,7 @@ void zsm_c_pause_music(void)
     }
 }
 
-void zsm_c_resume_music(void)
+void zsm_resume_music(void)
 {
     if (g_zsm.saved_delay == 0u) {
         return;
@@ -242,30 +242,30 @@ void zsm_c_resume_music(void)
     }
 }
 
-void zsm_c_force_loop(uint8_t repeats)
+void zsm_force_loop(uint8_t repeats)
 {
     g_zsm.loop_count = repeats;
     g_zsm.loop_enabled = 1u;
 }
 
-void zsm_c_set_loop(uint8_t repeats)
+void zsm_set_loop(uint8_t repeats)
 {
     if (g_zsm.loop_defined != 0u) {
         g_zsm.loop_count = repeats;
     }
 }
 
-void zsm_c_disable_loop(void)
+void zsm_disable_loop(void)
 {
     g_zsm.loop_enabled = 0u;
 }
 
-uint16_t zsm_c_get_tick_rate(void)
+uint16_t zsm_get_tick_rate(void)
 {
     return g_zsm.tick_rate;
 }
 
-int zsm_c_step_music(void)
+int zsm_step_music(void)
 {
     if (g_zsm.delay == 0u || g_zsm.data_ptr == NULL) {
         return 1;
@@ -280,7 +280,7 @@ int zsm_c_step_music(void)
 
         if (cmd == ZSM_EOF) {
             if (g_zsm.loop_enabled == 0u || g_zsm.loop_ptr == NULL) {
-                zsm_c_stop_music();
+                zsm_stop_music();
                 return 1;
             }
 
@@ -288,7 +288,7 @@ int zsm_c_step_music(void)
                 --g_zsm.loop_count;
                 if (g_zsm.loop_count == 0u) {
                     g_zsm.loop_enabled = 0u;
-                    zsm_c_stop_music();
+                    zsm_stop_music();
                     return 1;
                 }
             }
@@ -333,7 +333,7 @@ int zsm_c_step_music(void)
     }
 }
 
-void zsm_c_play_frame_60hz(void)
+void zsm_play_frame_60hz(void)
 {
     uint16_t steps = g_zsm.frame_int;
     g_zsm.frame_accum = (uint16_t)(g_zsm.frame_accum + g_zsm.frame_frac);
@@ -342,6 +342,6 @@ void zsm_c_play_frame_60hz(void)
     }
 
     while (steps-- != 0u) {
-        zsm_c_step_music();
+        zsm_step_music();
     }
 }

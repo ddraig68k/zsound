@@ -25,7 +25,7 @@ volatile uint8_t vblank = 0;
 
 static void audio_service_tick_60hz(void)
 {
-    zsm_c_play_frame_60hz();
+    zsm_play_frame_60hz();
     zfx_fm_c_update();
 }
 
@@ -33,7 +33,7 @@ static void init_sfx_voices(void)
 {
     for (uint8_t voice = 0; voice < 8u; ++voice) {
         if ((SFX_FM_MASK & (1u << voice)) != 0u) {
-            zsm_c_patch_ym_voice(voice, ymp_ding);
+            zsm_patch_ym_voice(voice, ymp_ding);
         }
     }
 }
@@ -152,15 +152,15 @@ int main(int argc, char *argv[])
     ym2151_set_clock(4000000);
     printf("Set ym2151 clock to 4mhz\n");
 
-    zsm_c_init_player();
-    zsm_c_pcm_init();
+    zsm_init_player();
+    zsm_pcm_init();
     zfx_fm_c_init();
-    zsm_c_set_fm_channel_mask(MUSIC_FM_MASK);
+    zsm_set_fm_channel_mask(MUSIC_FM_MASK);
     zfx_fm_c_set_allowed_mask(SFX_FM_MASK);
     init_sfx_voices();
 
     VDP_REG_WRITE(REG_INTERRUPT, 0x0001);
-    printf("Music YM mask: 0x%02X, SFX YM mask: 0x%02X\n", zsm_c_get_fm_channel_mask(), zfx_fm_c_get_allowed_mask());
+    printf("Music YM mask: 0x%02X, SFX YM mask: 0x%02X\n", zsm_get_fm_channel_mask(), zfx_fm_c_get_allowed_mask());
     printf("Press 's' to trigger a ding SFX, 'm' for music, 'q' to quit\n");
     uint8_t play = 1;
     uint8_t playmusic = 0;
@@ -192,14 +192,14 @@ int main(int argc, char *argv[])
             else if (key == 'm')
             {
                 printf("Playing song %s\n", filename);
-                zsm_c_start_music(g_music_data);
+                zsm_start_music(g_music_data);
                 playmusic = 1;
             }
             printf("%c", key);
         }
     }
 
-    zsm_c_stop_music();
+    zsm_stop_music();
 
     VDP_REG_WRITE(REG_INTERRUPT, 0x0000);
     // Disable YM2151 interrupt
