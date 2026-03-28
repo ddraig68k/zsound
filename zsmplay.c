@@ -22,6 +22,10 @@ volatile uint8_t vblank = 0;
 
 #define MUSIC_FM_MASK 0x0Fu
 #define SFX_FM_MASK   0xF0u
+#define FOOTSTEP_VOICE 4u
+#define DYNAMIC_SFX_RESERVED_MASK (1u << FOOTSTEP_VOICE)
+#define PRIORITY_FOOTSTEP 1u
+#define PRIORITY_DING     2u
 
 static void audio_service_tick_60hz(void)
 {
@@ -33,20 +37,30 @@ static void init_sfx_voices(void)
 {
     for (uint8_t voice = 0; voice < 8u; ++voice) {
         if ((SFX_FM_MASK & (1u << voice)) != 0u) {
-            zsm_patch_ym_voice(voice, ymp_ding);
+            zfx_fm_c_bind_patch(voice, ymp_ding);
         }
     }
 }
 
 static void trigger_test_ding(void)
 {
-    int voice = zfx_fm_c_play_any(zfx_ding);
+    int voice = zfx_fm_c_play_any_cached(ymp_ding, zfx_ding, PRIORITY_DING);
     if (voice < 0) {
         printf("\nNo SFX voice available\n");
         return;
     }
 
     printf("\nTriggered ding on YM voice %d\n", voice);
+}
+
+static void trigger_test_footstep(void)
+{
+    if (zfx_fm_c_play_fixed(FOOTSTEP_VOICE, ymp_ding, zfx_ding, PRIORITY_FOOTSTEP) != 0) {
+        printf("\nFootstep voice unavailable\n");
+        return;
+    }
+
+    printf("\nTriggered fixed-voice SFX on YM voice %d\n", FOOTSTEP_VOICE);
 }
 
 void __attribute__((interrupt)) interrupt_player()
@@ -157,11 +171,12 @@ int main(int argc, char *argv[])
     zfx_fm_c_init();
     zsm_set_fm_channel_mask(MUSIC_FM_MASK);
     zfx_fm_c_set_allowed_mask(SFX_FM_MASK);
+    zfx_fm_c_set_reserved_mask(DYNAMIC_SFX_RESERVED_MASK);
     init_sfx_voices();
 
     VDP_REG_WRITE(REG_INTERRUPT, 0x0001);
-    printf("Music YM mask: 0x%02X, SFX YM mask: 0x%02X\n", zsm_get_fm_channel_mask(), zfx_fm_c_get_allowed_mask());
-    printf("Press 's' to trigger a ding SFX, 'm' for music, 'q' to quit\n");
+    printf("Music YM mask: 0x%02X, SFX YM mask: 0x%02X, reserved SFX mask: 0x%02X\n", zsm_get_fm_channel_mask(), zfx_fm_c_get_allowed_mask(), zfx_fm_c_get_reserved_mask());
+    printf("Press 'f' for fixed-voice SFX, 's' for dynamic SFX, 'm' for music, 'q' to quit\n");
     uint8_t play = 1;
     uint8_t playmusic = 0;
 
@@ -187,6 +202,8 @@ int main(int argc, char *argv[])
             char key = get_char();
             if (key == 'q')
                 play = 0;
+            else if (key == 'f')
+                trigger_test_footstep();
             else if (key == 's')
                 trigger_test_ding();
             else if (key == 'm')

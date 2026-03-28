@@ -88,7 +88,16 @@ function load_patches($filelist) {
 			}
 			break;
 		case 'opm':
-			print "STUB: OPM file $infile (support is planned)\n";
+			$opm_patches = get_opm_patches($infile);
+			if (sizeof($opm_patches) == 0) {
+				print "WARNING: $infile did not contain any valid OPM patches. (skipped)\n";
+				break;
+			}
+			foreach ($opm_patches as $opm_patch) {
+				$p['data'] = array_merge($p['data'],$opm_patch['data']);
+				array_push($p['names'],namefilter($opm_patch['name']));
+				$p['n']++;
+			}
 			break;
 		default:
 			print "WARNING: Unknown file type: $infile (skipped)\n";
@@ -189,6 +198,132 @@ function get_dmp_patch($filename) {
 //	for($i=0;$i<26;$i++) { array_push($returndata,$data[$i]); }
 	//return($returndata);
 	return ($data);
+}
+
+function get_opm_patches($filename) {
+	$lines = @file($filename, FILE_IGNORE_NEW_LINES);
+	$patches = array();
+	$current = null;
+
+	if ($lines === false) {
+		print "WARNING: Unable to open input file $filename (Skipping)\n";
+		return($patches);
+	}
+
+	foreach ($lines as $line) {
+		$line = trim($line);
+		if ($line === '' || strpos($line, '//') === 0) {
+			continue;
+		}
+
+		if (preg_match('/^@:\s*([0-9]+)\s*(.*)$/', $line, $m)) {
+			if ($current !== null) {
+				$patch = finalize_opm_patch($current);
+				if ($patch !== null) {
+					$patches[] = $patch;
+				}
+			}
+			$name = trim($m[2]);
+			if ($name === '') {
+				$name = 'instrument_' . $m[1];
+			}
+			$current = array(
+				'index' => intval($m[1]),
+				'name' => $name,
+				'ch' => null,
+				'ops' => array()
+			);
+			continue;
+		}
+
+		if ($current === null) {
+			continue;
+		}
+
+		if (preg_match('/^CH:\s*(.+)$/', $line, $m)) {
+			$fields = preg_split('/\s+/', trim($m[1]));
+			if (sizeof($fields) >= 7) {
+				$current['ch'] = array_map('intval', array_slice($fields, 0, 7));
+			}
+			continue;
+		}
+
+		if (preg_match('/^(M1|C1|M2|C2):\s*(.+)$/', $line, $m)) {
+			$fields = preg_split('/\s+/', trim($m[2]));
+			if (sizeof($fields) >= 11) {
+				$current['ops'][$m[1]] = array_map('intval', array_slice($fields, 0, 11));
+			}
+			continue;
+		}
+	}
+
+	if ($current !== null) {
+		$patch = finalize_opm_patch($current);
+		if ($patch !== null) {
+			$patches[] = $patch;
+		}
+	}
+
+	if (sizeof($patches) == 1) {
+		$patches[0]['name'] = trim(pathinfo($filename)['filename']);
+		return($patches);
+	}
+
+	if (sizeof($patches) == 0) {
+		return($patches);
+	}
+
+	$base = trim(pathinfo($filename)['filename']);
+	foreach ($patches as $i => $patch) {
+		$patches[$i]['name'] = $base . '_' . $patch['name'];
+	}
+	return($patches);
+}
+
+function finalize_opm_patch($patch) {
+	$required_ops = array('M1', 'C1', 'M2', 'C2');
+
+	if ($patch['ch'] === null) {
+		return(null);
+	}
+
+	foreach ($required_ops as $opname) {
+		if (!isset($patch['ops'][$opname])) {
+			return(null);
+		}
+	}
+
+	return array(
+		'name' => $patch['name'],
+		'data' => build_opm_patch_data($patch['ch'], $patch['ops'])
+	);
+}
+
+function build_opm_patch_data($ch, $ops) {
+	$data = array();
+	$pan = FORCE_STEREO ? 0xc0 : ($ch[0] & 0xc0);
+	$fl = ($ch[1] & 0x07) << 3;
+	$con = $ch[2] & 0x07;
+	$ams = $ch[3] & 0x03;
+	$pms = ($ch[4] & 0x07) << 4;
+
+	$data[0] = $pan | $fl | $con;
+	$data[1] = $pms | $ams;
+
+	$order = array('M1', 'C1', 'M2', 'C2');
+	foreach ($order as $oper => $opname) {
+		$op = $ops[$opname];
+		$idx = $oper;
+		$data[$idx + 2] = (($op[8] & 0x07) << 4) | ($op[7] & 0x0f);
+		$data[$idx + 6] = $op[5] & 0x7f;
+		$data[$idx + 10] = (($op[6] & 0x03) << 6) | ($op[0] & 0x1f);
+		$data[$idx + 14] = (($op[10] & 0x01) << 7) | ($op[1] & 0x1f);
+		$data[$idx + 18] = (($op[9] & 0x03) << 6) | ($op[2] & 0x1f);
+		$data[$idx + 22] = (($op[4] & 0x0f) << 4) | ($op[3] & 0x0f);
+	}
+
+	ksort($data, SORT_NUMERIC);
+	return($data);
 }
 
 function set_outfile($filename) {
@@ -370,7 +505,7 @@ function parse_cmdline_args() {
 
 	$dmpfiles = array();
 
-	$opts = getopt('hHprbBacl:o:', [], $rest_index);
+	$opts = getopt('hHsprbBacl:o:', [], $rest_index);
 
 	if (isset($opts['h'])) {usage();}
 	if (isset($opts['H'])) {show_format_help();}
@@ -391,6 +526,12 @@ function parse_cmdline_args() {
 	}
 	else {
 		define("OUTNAME","patches");
+	}
+
+	if (isset($opts['s'])) {
+		define("FORCE_STEREO",true);
+	} else {
+		define("FORCE_STEREO",false);
 	}
 
 	if (isset($opts['p']) || isset($opts['r'])) {
@@ -488,6 +629,7 @@ function usage() {
 	printf("name%s name%s, name%s, name%s (YM Patch) respectively\n",EXT_BASIC,EXT_C,EXT_ASM,EXT_BIN);
 	print "NOTE: output files are automatically overwritten if they already exist.\n";
 	print "\nOTHER:\n";
+	printf($row,"-s :","Force OPM imports to set both YM output channels (LR=$C0)");
 	printf($row,"-l","<BASIC line number> : BASIC routines begin at this line number");
 	printf($row,"","(default = 10000)");
 	if (isset($opts['h'])) { exit(0); } else { exit(1); }

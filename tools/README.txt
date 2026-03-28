@@ -11,11 +11,10 @@ See below for instructions to use PHP in Windows
 
 dmp2x16:
 	Converts Deflemask DMP instruments (FM only) into several forms,
-	including BASIC, C, ca65 assembly, and raw binary (YMP format)
+	including BASIC, C, ca65 assembly, and raw binary (YMP format).
+	It also imports standard OPM instrument files for YM2151 patches.
 	with or without the 2-byte PRG header. Use dmp2x16 -H for more
 	information on the output formats.
-
-	WIP: tool will eventually support OPM instrument file format
 
 vgm2zsm:
 	Converts VGM files into ZSM music stream format. Supports YM2151,
@@ -36,12 +35,12 @@ raw2zcm:
 	formats for input (WAV, MP3, etc) and convert them into ZCM.
 
 zsm2sfx:
-	Currently broken - this tool is intended to be part of an admittely
-	convoluted workflow whereby FM-based SFX are created in Deflemask,
-	exported as VGM, then converted to ZSM using vgm2zsm, and finally
-	using this tool to strip down the ZSM into the bare minimum number
-	of writes needed to play the sound - the SFX format is different than
-	the ZSM format.
+	Extracts a single FM voice from a revision-1 ZSM file and converts it
+	into two outputs suitable for the ZFX FM helper:
+		- a 26-byte YMP patch block
+		- a reg/value/delay FM triplet stream
+	If the ZSM uses exactly one FM voice, the tool auto-selects it.
+	Otherwise pass -v to choose the source YM voice.
 
 vgmconvert:
 	This is an in-development project to replace the vgm2zsm tool with a
@@ -65,4 +64,3 @@ To permanently modify your path... Google has answers.
 Once PHP is in your path, you may execute the scripts from the commandline:
 	php dmp2x16 ...
 	php vgm2zsm ...
-

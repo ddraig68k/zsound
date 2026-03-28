@@ -1,111 +1,381 @@
 #!/usr/bin/php
 <?php
 
-// NOTE - this script is outdated, as it was made for the original ZSM format
-// which has been updated significantly.
-//
-// TODO: Update this script to support current ZSM spec.
-//
+define('EXT_ASM', '.inc');
+define('EXT_C', '.h');
+define('ZSM_HEADER_SIZE', 16);
+define('ZSM_EOF', 0x80);
 
-/* This script is for use on ZSM streams in order to convert them into SFX-style
- * formatting instead of music-style formatting. SFX stream format is very bare-bones:
- * 
- * FM:  {reg} {val} {pause} {reg} {val} {pause} ...
- * PSG: {reg+pause} {val} {reg+pause} {val} ...
- *
- * For FM:
- * pause value of $00 = continue playing w/o delay (obviously) but pause bytes
- * 			are required, even if zero.
- * pause value of $FF = end of data
- *
- * For PSG:
- * The reg+pause byte is packed with bits 0-1 being the register offset
- * (i.e. 0=freq_lo, 1=freq_hi, 2=volume, 3=waveform/pulsewidth)
- * Bits 2-7 contain the pause value.
- * Pause value of 63 (%1111 11xx) = EOF (the reg/val are ignored)
- *
- * The stream contains no header info or command frames for multiplexing FM and PSG
- * sound commands. This script assumes FM for the moment, but could easily encorporate
- * both styles.
- *
- * The SFX stream MUST be made for only one type of data.
- * FM-based SFX should only use one channel of FM.
- *
- * The script was written to tidy up the output from Deflemask-based VGMs which have
- * tons of crazy extra stuff thrown in there. The intended workflow is:
- * 1) make sound in Deflemask (or at least the instrument)
- * 2) export as VGM
- * 3) convert to ZSM using vgm2zsm
- * 4) use this script to convert the ZSM into simple 3-bytes-per-row text format.
- *
- * The output is intended for use as include file material (.byte r, v, p)
- * but can also be converted into C-style static array definitions for #include, etc.
-*/
+main();
 
+function main() {
+	$options = parse_args();
+	$zsm = read_binary($options['input']);
 
-if (isset($argv[1]))
-	define("FILENAME", $argv[1]);
-else
-	define("FILENAME", 'kenstage.vgm');
+	if (sizeof($zsm) < ZSM_HEADER_SIZE) {
+		fail("Input file is too small to be a valid ZSM.");
+	}
 
-$filesize=filesize(FILENAME);
-$f = fopen(FILENAME, "r");
-$binary=fread($f,$filesize);
-fclose($f);
+	validate_zsm_header($zsm);
+	$voice = determine_voice($zsm, $options['voice']);
+	$result = extract_fm_sfx($zsm, $voice);
 
-$zsm=unpack(sprintf('C%d',$filesize),$binary);
+	if ($result['event_count'] == 0) {
+		print "WARNING: No FM events were extracted for voice $voice. Output will only contain a terminating key-up.\n";
+	}
 
-$zsm = array_values($zsm);
-
-$shadow = array (0x20 => 999, 0x28 => 999, 0x30 => 999, 0x38 => 999);
-for ($i = 0x40 ; $i <= 0xe0 ; $i += 0x20) {
-	$shadow[$i] = 999;
-	$shadow[$i+0x08] = 999;
-	$shadow[$i+0x10] = 999;
-	$shadow[$i+0x18] = 999;
+	emit_output($options, $voice, $result);
 }
 
-$i = 18; // skip ZSM header bytes
+function parse_args() {
+	global $argv;
+	global $argc;
 
-$pause = -1;
-while ($i < $filesize) {
-	switch ($zsm[$i]) {
-	case 0:
-		$i++;
-		if ($pause >= 0) {$pause += $zsm[$i];}
-		$i++;
-		break;
-	case 1:
-		$r = $zsm[++$i];
-		$v = $zsm[++$i];
-		$i++;
-		if (array_key_exists($r,$shadow)) {
-			if ($shadow[$r] != $v) {
-				if ($pause >= 0) {
-					printf(", \$%02x\n",$pause);
-				}
-				$pause = 0;
-				printf("\$%02x, \$%02x",$r,$v);
-				$shadow[$r] = $v;
-			}
-		} else if($r == 0x08) {
-			if ($pause >= 0) {
-				printf(", \$%02x\n",$pause);
-			}
-			$pause = 0;
-			printf("\$08, \$%02x",$v);
-		}
-		break;
-	case 0xff:
-		$i = $filesize;
-		printf (", \$%02x\n",$pause);
-		print "EOF\n";
-		break;
-	default:
-		print "We've gone off the rails!!!\n";
-		exit;
-		break;
+	$options = getopt('haco:v:p:s:', [], $rest_index);
+	if (isset($options['h']) || $argc < 2) {
+		usage(isset($options['h']) ? 0 : 1);
 	}
+
+	if (!isset($argv[$rest_index])) {
+		fail("No input file specified.");
+	}
+
+	$input = $argv[$rest_index];
+	$base = trim(pathinfo($input)['filename']);
+	$base = namefilter($base);
+
+	$voice = null;
+	if (isset($options['v'])) {
+		$voice = intval($options['v']);
+		if ($voice < 0 || $voice > 7) {
+			fail("Voice must be in the range 0-7.");
+		}
+	}
+
+	$patch_label = isset($options['p']) ? trim($options['p']) : ('YMP_' . $base);
+	$seq_label = isset($options['s']) ? trim($options['s']) : ('ZFX_' . $base);
+
+	return array(
+		'input' => $input,
+		'voice' => $voice,
+		'outname' => isset($options['o']) ? $options['o'] : null,
+		'asm' => isset($options['a']),
+		'c' => isset($options['c']),
+		'patch_label' => $patch_label,
+		'seq_label' => $seq_label
+	);
+}
+
+function usage($exit_code) {
+	global $argv;
+
+	print "USAGE:\n";
+	print "  $argv[0] [-a|-c] [-o outname] [-v voice] [-p patch_label] [-s seq_label] file.zsm\n\n";
+	print "OPTIONS:\n";
+	print "  -a  Write ASM include output (.inc)\n";
+	print "  -c  Write C header output (.h)\n";
+	print "  -o  Output filename prefix. If omitted, output is written to stdout.\n";
+	print "  -v  FM voice number to extract (0-7). If omitted, the tool auto-selects when exactly one FM voice is present.\n";
+	print "  -p  Patch label name. Default: YMP_<inputname>\n";
+	print "  -s  Sequence label name. Default: ZFX_<inputname>\n";
+	print "\n";
+	print "The tool extracts a single FM voice from a revision-1 ZSM stream and emits:\n";
+	print "  - a 26-byte YMP patch block from the pre-key-on voice state\n";
+	print "  - a ZFX FM triplet stream (reg, value, delay) for the selected voice\n";
+	print "\n";
+	print "If neither -a nor -c is specified, ASM-style text is written to stdout.\n";
+	exit($exit_code);
+}
+
+function fail($message) {
+	fwrite(STDERR, "ERROR: $message\n");
+	exit(1);
+}
+
+function read_binary($filename) {
+	$data = @file_get_contents($filename);
+	if ($data === false) {
+		fail("Unable to open input file $filename");
+	}
+
+	$bytes = unpack('C*', $data);
+	return array_values($bytes);
+}
+
+function validate_zsm_header($zsm) {
+	if ($zsm[0] != ord('z') || $zsm[1] != ord('m')) {
+		fail("Input file does not begin with ZSM magic 'zm'.");
+	}
+
+	if ($zsm[2] < 1 || $zsm[2] > 1) {
+		fail("Unsupported ZSM version " . $zsm[2] . ". Only revision 1 is supported.");
+	}
+}
+
+function determine_voice($zsm, $requested_voice) {
+	$mask = $zsm[9];
+
+	if ($requested_voice !== null) {
+		if (($mask & (1 << $requested_voice)) == 0) {
+			print "WARNING: Voice $requested_voice is not set in the ZSM FM channel mask 0x" . sprintf('%02X', $mask) . ". Continuing anyway.\n";
+		}
+		return $requested_voice;
+	}
+
+	$voices = array();
+	for ($voice = 0; $voice < 8; $voice++) {
+		if (($mask & (1 << $voice)) != 0) {
+			$voices[] = $voice;
+		}
+	}
+
+	if (sizeof($voices) == 1) {
+		return $voices[0];
+	}
+
+	if (sizeof($voices) == 0) {
+		fail("The ZSM FM channel mask is empty. Use -v to force extraction if the file is unusual.");
+	}
+
+	fail("The ZSM uses multiple FM voices (" . implode(',', $voices) . "). Use -v to choose one.");
+}
+
+function extract_fm_sfx($zsm, $voice) {
+	$patch_regs = ymp_registers();
+	$patch_shadow = array_fill_keys($patch_regs, 0);
+	$seq_shadow = array();
+	$events = array();
+	$pending = null;
+	$hold = array('reg' => 0x60, 'value' => 0x00);
+	$delay = 0;
+	$started = false;
+	$event_count = 0;
+
+	$ptr = ZSM_HEADER_SIZE;
+	$size = sizeof($zsm);
+
+	while ($ptr < $size) {
+		$cmd = $zsm[$ptr++];
+
+		if ($cmd == ZSM_EOF) {
+			break;
+		}
+
+		if (($cmd & 0x80) != 0) {
+			$delay += ($cmd & 0x7f);
+			continue;
+		}
+
+		if (($cmd & 0x40) == 0) {
+			$ptr += 1;
+			continue;
+		}
+
+		if (($cmd & 0x3f) == 0) {
+			if ($ptr >= $size) {
+				break;
+			}
+			$ext = $zsm[$ptr++];
+			$ptr += ($ext & 0x3f);
+			continue;
+		}
+
+		$count = $cmd & 0x3f;
+		for ($i = 0; $i < $count && ($ptr + 1) < $size; $i++) {
+			$reg = $zsm[$ptr++];
+			$value = $zsm[$ptr++];
+			$event = normalize_fm_event($reg, $value, $voice);
+			if ($event === null) {
+				continue;
+			}
+
+			if (isset($patch_shadow[$event['reg']]) && !$started) {
+				$patch_shadow[$event['reg']] = $event['value'];
+			}
+
+			if ($event['reg'] == 0x08 && ($event['value'] & 0x78) != 0) {
+				$started = true;
+			}
+
+			if (!$started && isset($patch_shadow[$event['reg']])) {
+				continue;
+			}
+
+			// Voice-local writes are redundant once normalized, except for key events.
+			if ($event['reg'] != 0x08) {
+				if (isset($seq_shadow[$event['reg']]) && $seq_shadow[$event['reg']] == $event['value']) {
+					continue;
+				}
+				$seq_shadow[$event['reg']] = $event['value'];
+				$hold = array('reg' => $event['reg'], 'value' => $event['value']);
+			}
+
+			finalize_pending_event($events, $pending, $delay, $hold);
+			$pending = array('reg' => $event['reg'], 'value' => $event['value']);
+			$delay = 0;
+			$event_count++;
+		}
+	}
+
+	if ($pending !== null) {
+		finalize_pending_event($events, $pending, $delay, $hold, true);
+	} else {
+		$events[] = array(0x08, 0x00, 0xff);
+	}
+
+	return array(
+		'patch' => ymp_from_shadow($patch_shadow),
+		'sequence' => flatten_events($events),
+		'event_count' => $event_count
+	);
+}
+
+function normalize_fm_event($reg, $value, $voice) {
+	if ($reg == 0x08) {
+		if (($value & 0x07) != $voice) {
+			return null;
+		}
+		return array('reg' => 0x08, 'value' => ($value & 0xf8));
+	}
+
+	if ($reg < 0x20) {
+		return null;
+	}
+
+	if (($reg & 0x07) != $voice) {
+		return null;
+	}
+
+	return array('reg' => ($reg & 0xf8), 'value' => $value);
+}
+
+function finalize_pending_event(&$events, $pending, $delay, $hold, $is_eof = false) {
+	if ($pending === null) {
+		return;
+	}
+
+	while ($delay > 0xfe) {
+		$events[] = array($pending['reg'], $pending['value'], 0xfe);
+		$pending = array('reg' => $hold['reg'], 'value' => $hold['value']);
+		$delay -= 0xfe;
+	}
+
+	$events[] = array($pending['reg'], $pending['value'], $is_eof ? 0xff : $delay);
+}
+
+function flatten_events($events) {
+	$out = array();
+	foreach ($events as $event) {
+		$out[] = $event[0];
+		$out[] = $event[1];
+		$out[] = $event[2];
+	}
+	return $out;
+}
+
+function ymp_registers() {
+	return array(
+		0x20,0x38,
+		0x40,0x48,0x50,0x58,
+		0x60,0x68,0x70,0x78,
+		0x80,0x88,0x90,0x98,
+		0xa0,0xa8,0xb0,0xb8,
+		0xc0,0xc8,0xd0,0xd8,
+		0xe0,0xe8,0xf0,0xf8
+	);
+}
+
+function ymp_from_shadow($shadow) {
+	$data = array();
+	foreach (ymp_registers() as $reg) {
+		$data[] = isset($shadow[$reg]) ? $shadow[$reg] : 0;
+	}
+	return $data;
+}
+
+function emit_output($options, $voice, $result) {
+	$text = '';
+	if ($options['c']) {
+		$text = render_c($options, $voice, $result);
+	} else {
+		$text = render_asm($options, $voice, $result);
+	}
+
+	if ($options['outname'] === null) {
+		print $text;
+		return;
+	}
+
+	$ext = $options['c'] ? EXT_C : EXT_ASM;
+	$outfile = $options['outname'] . $ext;
+	if (@file_put_contents($outfile, $text) === false) {
+		fail("Unable to write output file $outfile");
+	}
+	print "Wrote output to $outfile\n";
+}
+
+function render_asm($options, $voice, $result) {
+	$out = '';
+	$out .= sprintf("; Extracted from %s, FM voice %d\n", $options['input'], $voice);
+	$out .= sprintf("%s:\n", $options['patch_label']);
+	$out .= format_asm_bytes($result['patch'], 8);
+	$out .= "\n";
+	$out .= sprintf("%s:\n", $options['seq_label']);
+	$out .= format_asm_bytes($result['sequence'], 12);
+	return $out;
+}
+
+function render_c($options, $voice, $result) {
+	$out = '';
+	$out .= sprintf("/* Extracted from %s, FM voice %d */\n", $options['input'], $voice);
+	$out .= "#include <stdint.h>\n\n";
+	$out .= sprintf("const uint8_t %s[26] = {\n", $options['patch_label']);
+	$out .= format_c_bytes($result['patch'], 12);
+	$out .= "};\n\n";
+	$out .= sprintf("const uint8_t %s[%d] = {\n", $options['seq_label'], sizeof($result['sequence']));
+	$out .= format_c_bytes($result['sequence'], 12);
+	$out .= "};\n";
+	return $out;
+}
+
+function format_asm_bytes($bytes, $per_line) {
+	$out = '';
+	$count = sizeof($bytes);
+	for ($i = 0; $i < $count; $i++) {
+		if (($i % $per_line) == 0) {
+			$out .= "\t.byte\t";
+		} else {
+			$out .= ",";
+		}
+		$out .= sprintf('$%02x', $bytes[$i]);
+		if (($i % $per_line) == ($per_line - 1) || $i == ($count - 1)) {
+			$out .= "\n";
+		}
+	}
+	return $out;
+}
+
+function format_c_bytes($bytes, $per_line) {
+	$out = '';
+	$count = sizeof($bytes);
+	for ($i = 0; $i < $count; $i++) {
+		if (($i % $per_line) == 0) {
+			$out .= "\t";
+		}
+		$out .= sprintf('0x%02x,', $bytes[$i]);
+		if (($i % $per_line) == ($per_line - 1) || $i == ($count - 1)) {
+			$out .= "\n";
+		}
+	}
+	return $out;
+}
+
+function namefilter($name) {
+	$name = preg_replace("/[\t\n]/", " ", $name);
+	$name = preg_replace("/\s+/", " ", $name);
+	$name = preg_replace("/[\s.-]/", "_", $name);
+	$name = preg_replace("/^[0-9]*/", "", $name);
+	return $name;
 }
 
 ?>
